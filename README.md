@@ -4,6 +4,8 @@ This branch contains the Proof of Concept (PoC) for the **Local-Only Encrypted V
 
 This feature allows users to selectively encrypt individual notes on their local device using AES-256-GCM. The architecture intercepts the SQLite database layer to ensure the plaintext is never written to disk, and bypasses the `SyncInfoCache` to guarantee the local master key never leaks to the cloud sync engine.
 
+![alt text](image.png)
+
 ## 🎯 Scope & Purpose of this PoC
 
 The **sole purpose** of this PoC is to prove that the most difficult backend architectural hurdles of this proposal are solvable. Specifically, it validates:
