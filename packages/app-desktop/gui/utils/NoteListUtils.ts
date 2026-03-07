@@ -52,6 +52,8 @@ export default class NoteListUtils {
 				// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Old code before rule was applied
 				menu.append(new MenuItem(menuUtils.commandToStatefulMenuItem(cmd, singleNoteId) as any));
 
+				menu.append(new MenuItem(menuUtils.commandToStatefulMenuItem('toggleNoteEncryption', singleNoteId) as any));
+
 				menu.append(new MenuItem({ type: 'separator' }));
 			}
 

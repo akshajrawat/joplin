@@ -18,12 +18,20 @@ const { _, _n } = require('../locale');
 import { pull, removeElement, unique } from '../ArrayUtils';
 import { LoadOptions, SaveOptions } from './utils/types';
 import ActionLogger from '../utils/ActionLogger';
+import EncryptionService from '../services/e2ee/EncryptionService';
+import MasterKey, { SOURCE_LOCAL_VAULT } from './MasterKey';
 import { getDisplayParentId, getTrashFolderId } from '../services/trash';
 import { getCollator } from './utils/getCollator';
 const urlUtils = require('../urlUtils.js');
 const { isImageMimeType } = require('../resourceUtils');
 const { MarkupToHtml } = require('@joplin/renderer');
 const { ALL_NOTES_FILTER_ID } = require('../reserved-ids');
+
+interface LocalSessionNoteEntity extends NoteEntity {
+	is_locally_encrypted?: number;
+	local_cipher_text?: string;
+	is_local_session_unlocked?: boolean;
+}
 
 export interface PreviewsOrder {
 	by: string;
@@ -770,8 +778,25 @@ export default class Note extends BaseItem {
 		return n.updated_time < date;
 	}
 
-	public static load(id: string, options: LoadOptions = null): Promise<NoteEntity> {
-		return super.load(id, options);
+	public static async load(id: string, options: LoadOptions = null): Promise<NoteEntity> {
+		const note = await super.load(id, options);
+		if (!note) return note;
+
+		const localSessionNote = note as LocalSessionNoteEntity;
+
+		if (localSessionNote.is_locally_encrypted === 1) {
+			const localMasterKey = await MasterKey.localVaultMasterKey();
+			if (!localMasterKey || !EncryptionService.instance().isMasterKeyLoaded(localMasterKey)) {
+				note.body = '';
+				localSessionNote.is_local_session_unlocked = false;
+				return note;
+			}
+
+			note.body = (await EncryptionService.instance().decryptString(localSessionNote.local_cipher_text || '', { masterKeyId: localMasterKey.id })) || '';
+			localSessionNote.is_local_session_unlocked = true;
+		}
+
+		return note;
 	}
 
 	public static async save(o: NoteEntity, options: SaveOptions = null): Promise<NoteEntity> {
@@ -816,6 +841,20 @@ export default class Note extends BaseItem {
 		// in the item_changes table
 		const oldNote = !isNew && o.id ? await Note.load(o.id) : null;
 
+		const noteToSave: LocalSessionNoteEntity = { ...o };
+		delete noteToSave.is_local_session_unlocked;
+
+		const localPlainBody: string = typeof noteToSave.body === 'string' ? noteToSave.body : '';
+		if (noteToSave.is_locally_encrypted === 1) {
+			const localMasterKey = await MasterKey.localVaultMasterKey();
+			if (!localMasterKey || localMasterKey.source !== SOURCE_LOCAL_VAULT) throw new Error('Local vault master key is not available');
+			noteToSave.local_cipher_text = await EncryptionService.instance().encryptString(localPlainBody, { masterKeyId: localMasterKey.id });
+			noteToSave.body = '';
+		} else if (noteToSave.is_locally_encrypted === 0) {
+			noteToSave.local_cipher_text = '';
+		}
+
+		
 		syncDebugLog.info('Save Note: P:', oldNote);
 
 		let beforeNoteJson = null;
@@ -833,18 +872,24 @@ export default class Note extends BaseItem {
 		const changedFields = [];
 
 		if (oldNote) {
-			for (const field in o) {
-				if (!o.hasOwnProperty(field)) continue;
+			for (const field in noteToSave) {
+				if (!noteToSave.hasOwnProperty(field)) continue;
 				// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Old code before rule was applied
-				if ((o as any)[field] !== (oldNote as any)[field]) {
+				for (const field in noteToSave) {
+				if (!noteToSave.hasOwnProperty(field)) continue;
 					changedFields.push(field);
 				}
 			}
 		}
 
-		syncDebugLog.info('Save Note: N:', o);
+		syncDebugLog.info('Save Note: N:', noteToSave);
 
-		let savedNote = await super.save(o, options);
+		let savedNote = await super.save(noteToSave, options);
+
+		if (noteToSave.is_locally_encrypted === 1) {
+			savedNote.body = localPlainBody;
+			(savedNote as LocalSessionNoteEntity).is_local_session_unlocked = true;
+		}
 
 		void ItemChange.add(BaseModel.TYPE_NOTE, savedNote.id, isNew ? ItemChange.TYPE_CREATE : ItemChange.TYPE_UPDATE, {
 			changeSource, changeId: options?.changeId, beforeChangeItemJson: beforeNoteJson,
@@ -877,7 +922,7 @@ export default class Note extends BaseItem {
 			});
 		}
 
-		if ('todo_due' in o || 'todo_completed' in o || 'is_todo' in o || 'is_conflict' in o) {
+		if ('todo_due' in noteToSave || 'todo_completed' in noteToSave || 'is_todo' in noteToSave || 'is_conflict' in noteToSave) {
 			this.dispatch({
 				type: 'EVENT_NOTE_ALARM_FIELD_CHANGE',
 				id: savedNote.id,

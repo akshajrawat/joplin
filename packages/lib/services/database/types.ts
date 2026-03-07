@@ -238,6 +238,9 @@ export interface NoteEntity {
   'markup_language'?: number;
   'master_key_id'?: string;
   'order'?: number;
+  'is_locally_encrypted'?: number;
+  'local_cipher_text'?: string;
+  'is_local_session_unlocked'?: boolean;
   'parent_id'?: string;
   'share_id'?: string;
   'source'?: string;
