@@ -4,7 +4,7 @@ This branch contains the Proof of Concept (PoC) for the **Local-Only Encrypted V
 
 This feature allows users to selectively encrypt individual notes on their local device using AES-256-GCM. The architecture intercepts the SQLite database layer to ensure the plaintext is never written to disk, and bypasses the `SyncInfoCache` to guarantee the local master key never leaks to the cloud sync engine.
 
-![Joplin Local Vault Architecture](assets/architecture.png)
+<img width="2104" height="1352" alt="Untitled-2026-01-19-1458" src="https://github.com/user-attachments/assets/e2c5bcc3-daf4-4bad-ac77-ae7fcaf6805c" />
 
 ## 🎯 Scope & Purpose of this PoC
 
