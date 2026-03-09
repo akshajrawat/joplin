@@ -4,6 +4,8 @@ import { localSyncInfo, saveLocalSyncInfo } from '../services/synchronizer/syncI
 import BaseItem from './BaseItem';
 import uuid from '../uuid';
 
+export const SOURCE_LOCAL_VAULT = 2;
+
 export default class MasterKey extends BaseItem {
 	public static tableName() {
 		return 'master_keys';
@@ -48,6 +50,10 @@ export default class MasterKey extends BaseItem {
 		return localSyncInfo().masterKeys.find(mk => mk.id === id);
 	}
 
+	public static async localVaultMasterKey(): Promise<MasterKeyEntity> {
+		return this.db().selectOne('SELECT * FROM master_keys WHERE source = ? ORDER BY updated_time DESC LIMIT 1', [SOURCE_LOCAL_VAULT]);
+	}
+
 	public static async save(o: MasterKeyEntity): Promise<MasterKeyEntity> {
 		const syncInfo = localSyncInfo();
 
@@ -58,6 +64,27 @@ export default class MasterKey extends BaseItem {
 		}
 
 		masterKey.updated_time = Date.now();
+
+		if (masterKey.source === SOURCE_LOCAL_VAULT) {
+			await this.db().exec(`
+				INSERT INTO master_keys (id, created_time, updated_time, source_application, encryption_method, checksum, content, source)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+				ON CONFLICT(id) DO UPDATE SET
+					updated_time = excluded.updated_time,
+					source_application = excluded.source_application,
+					encryption_method = excluded.encryption_method,
+					checksum = excluded.checksum,
+					content = excluded.content,
+					source = excluded.source
+			`, [masterKey.id, masterKey.created_time, masterKey.updated_time, masterKey.source_application, masterKey.encryption_method, masterKey.checksum, masterKey.content, SOURCE_LOCAL_VAULT]);
+
+			this.dispatch({
+				type: 'MASTERKEY_UPDATE_ONE',
+				item: masterKey,
+			});
+
+			return masterKey;
+		}
 
 		const idx = syncInfo.masterKeys.findIndex(mk => mk.id === masterKey.id);
 

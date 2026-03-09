@@ -204,6 +204,20 @@ Skills Required: TypeScript, JavaScript, knowledge of voice assistant APIs
 
 Expected size of project: 175 hours
 
+### 15. Support for encrypted notes
+
+In general, notes in Joplin are immediately accessible. However the user may want to lock certain sensitive notes behind a password.
+
+Expected Outcome: The user can choose to encrypt certain notes and associated resources. When doing so, they would have to enter a password. The note then can only be decrypted using that password.
+
+Difficulty Level: Medium
+
+Skills Required: TypeScript, Ability to use cryptographic tools and libraries, React for UI
+
+Potential Mentors: Tessus, Laurent
+
+Expected size of project: 175 hours
+
 ## More info
 
 - Make sure you read the [Joplin Google Summer of Code Introduction](https://github.com/joplin/gsoc/blob/main/readme.md)
