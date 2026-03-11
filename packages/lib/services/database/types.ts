@@ -109,7 +109,10 @@ export interface FolderEntity {
   'encryption_cipher_text'?: string;
   'icon'?: string;
   'id'?: string | null;
+  'is_locally_encrypted'?: number;
   'is_shared'?: number;
+  'local_cipher_text'?: string;
+  'local_master_key_id'?: string;
   'master_key_id'?: string;
   'parent_id'?: string;
   'share_id'?: string;
@@ -233,8 +236,12 @@ export interface NoteEntity {
   'id'?: string | null;
   'is_conflict'?: number;
   'is_shared'?: number;
+  'is_local_session_unlocked'?: boolean;
+  'is_locally_encrypted'?: number;
   'is_todo'?: number;
   'latitude'?: number;
+  'local_cipher_text'?: string;
+   'local_master_key_id'?: string;
   'longitude'?: number;
   'markup_language'?: number;
   'master_key_id'?: string;
@@ -284,7 +291,9 @@ export interface ResourceEntity {
   'encryption_cipher_text'?: string;
   'file_extension'?: string;
   'filename'?: string;
+  'local_master_key_id'?: string;
   'id'?: string | null;
+  'is_locally_encrypted'?: number;
   'is_shared'?: number;
   'master_key_id'?: string;
   'mime'?: string;
@@ -390,6 +399,8 @@ export const databaseSchema: DatabaseTables = {
 		icon: { type: 'string' },
 		id: { type: 'string' },
 		is_shared: { type: 'number' },
+		local_cipher_text: { type: 'string' },
+		local_master_key_id: { type: 'string' },
 		master_key_id: { type: 'string' },
 		parent_id: { type: 'string' },
 		share_id: { type: 'string' },
@@ -507,7 +518,9 @@ export const databaseSchema: DatabaseTables = {
 		file_extension: { type: 'string' },
 		filename: { type: 'string' },
 		id: { type: 'string' },
+		is_locally_encrypted: { type: 'number' },
 		is_shared: { type: 'number' },
+		local_master_key_id: { type: 'string' },
 		master_key_id: { type: 'string' },
 		mime: { type: 'string' },
 		ocr_details: { type: 'string' },
@@ -576,6 +589,8 @@ export const databaseSchema: DatabaseTables = {
 		is_shared: { type: 'number' },
 		is_todo: { type: 'number' },
 		latitude: { type: 'number' },
+		local_cipher_text: { type: 'string' },
+		local_master_key_id: { type: 'string' },
 		longitude: { type: 'number' },
 		markup_language: { type: 'number' },
 		master_key_id: { type: 'string' },

@@ -20,6 +20,7 @@ import { LoadOptions, SaveOptions } from './utils/types';
 import ActionLogger from '../utils/ActionLogger';
 import { getDisplayParentId, getTrashFolderId } from '../services/trash';
 import { getCollator } from './utils/getCollator';
+import EncryptionService from '../services/e2ee/EncryptionService';
 const urlUtils = require('../urlUtils.js');
 const { isImageMimeType } = require('../resourceUtils');
 const { MarkupToHtml } = require('@joplin/renderer');
@@ -770,12 +771,58 @@ export default class Note extends BaseItem {
 		return n.updated_time < date;
 	}
 
-	public static load(id: string, options: LoadOptions = null): Promise<NoteEntity> {
-		return super.load(id, options);
+	public static async load(id: string, options: LoadOptions = null): Promise<NoteEntity> {
+		const note = await super.load(id, options);
+		if (!note) return note;
+
+		if (note.is_locally_encrypted === 1) {
+			const encryptionService = EncryptionService.instance();
+			if (note.local_master_key_id && encryptionService.isMasterKeyLoaded({ id: note.local_master_key_id })) {
+				note.body = note.local_cipher_text ? await encryptionService.decryptString(note.local_cipher_text, {
+					masterKeyId: note.local_master_key_id,
+				}) : '';
+				note.is_local_session_unlocked = true;
+			} else {
+				note.body = '';
+				note.is_local_session_unlocked = false;
+			}
+		}
+
+		return note;
 	}
 
 	public static async save(o: NoteEntity, options: SaveOptions = null): Promise<NoteEntity> {
-		const isNew = this.isNew(o, options);
+		const noteToSave: NoteEntity = { ...o };
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Transient UI-only field
+		delete (noteToSave as any).is_local_session_unlocked;
+
+		const oldNoteForMerge = noteToSave.id ? await super.load(noteToSave.id) : null;
+		if (oldNoteForMerge) {
+			if (noteToSave.body === undefined) noteToSave.body = oldNoteForMerge.body || '';
+			if (noteToSave.local_master_key_id === undefined) noteToSave.local_master_key_id = oldNoteForMerge.local_master_key_id || '';
+			if (noteToSave.local_cipher_text === undefined) noteToSave.local_cipher_text = oldNoteForMerge.local_cipher_text || '';
+			if (noteToSave.is_locally_encrypted === undefined) noteToSave.is_locally_encrypted = oldNoteForMerge.is_locally_encrypted || 0;
+		}
+
+		if (noteToSave.parent_id) {
+			const Folder = this.getClass<typeof FolderClass>('Folder');
+			const parentFolder = await Folder.load(noteToSave.parent_id, { fields: ['id', 'is_locally_encrypted', 'local_master_key_id'] });
+			if (parentFolder?.is_locally_encrypted === 1) {
+				noteToSave.is_locally_encrypted = 1;
+				if (!noteToSave.local_master_key_id) noteToSave.local_master_key_id = parentFolder.local_master_key_id;
+			}
+		}
+
+		const plaintextBody = noteToSave.body || '';
+
+		if (noteToSave.is_locally_encrypted === 1 && noteToSave.local_master_key_id) {
+			noteToSave.local_cipher_text = await EncryptionService.instance().encryptString(plaintextBody, {
+				masterKeyId: noteToSave.local_master_key_id,
+			});
+			noteToSave.body = '';
+		}
+
+		const isNew = this.isNew(noteToSave, options);
 
 		// If true, this is a provisional note - it will be saved permanently
 		// only if the user makes changes to it.
@@ -787,10 +834,10 @@ export default class Note extends BaseItem {
 		const ignoreProvisionalFlag = options && !!options.ignoreProvisionalFlag;
 
 		const dispatchUpdateAction = options ? options.dispatchUpdateAction !== false : true;
-		if (isNew && !o.source) o.source = Setting.value('appName');
-		if (isNew && !o.source_application) o.source_application = Setting.value('appId');
-		if (isNew && !('order' in o)) o.order = Date.now();
-		if (isNew && !('deleted_time' in o)) o.deleted_time = 0;
+		if (isNew && !noteToSave.source) noteToSave.source = Setting.value('appName');
+		if (isNew && !noteToSave.source_application) noteToSave.source_application = Setting.value('appId');
+		if (isNew && !('order' in noteToSave)) noteToSave.order = Date.now();
+		if (isNew && !('deleted_time' in noteToSave)) noteToSave.deleted_time = 0;
 
 		const changeSource = options && options.changeSource ? options.changeSource : null;
 
@@ -814,7 +861,7 @@ export default class Note extends BaseItem {
 		// now cache note ids for notes which were changed since the last collection, in order to determine whether
 		// we should set beforeNoteJson to the current contents in the database, or the last value which was stored
 		// in the item_changes table
-		const oldNote = !isNew && o.id ? await Note.load(o.id) : null;
+		const oldNote = !isNew && noteToSave.id ? await super.load(noteToSave.id) : null;
 
 		syncDebugLog.info('Save Note: P:', oldNote);
 
@@ -822,9 +869,9 @@ export default class Note extends BaseItem {
 		// Only update the beforeNoteJson if encryption is not applied, to avoid creating a faulty revision if an encrypted profile
 		// has just been downloaded from the sync target and save is invoked when the note has not yet been decrypted
 		if (oldNote && !oldNote.encryption_applied) {
-			const changedSinceCollection = this.revisionService().changedSinceCollection(o.id);
+			const changedSinceCollection = this.revisionService().changedSinceCollection(noteToSave.id);
 			if (changedSinceCollection) {
-				beforeNoteJson = await ItemChange.oldNoteContent(o.id);
+				beforeNoteJson = await ItemChange.oldNoteContent(noteToSave.id);
 			} else {
 				beforeNoteJson = JSON.stringify(oldNote);
 			}
@@ -833,18 +880,30 @@ export default class Note extends BaseItem {
 		const changedFields = [];
 
 		if (oldNote) {
-			for (const field in o) {
-				if (!o.hasOwnProperty(field)) continue;
+			for (const field in noteToSave) {
+				if (!noteToSave.hasOwnProperty(field)) continue;
 				// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Old code before rule was applied
-				if ((o as any)[field] !== (oldNote as any)[field]) {
+				if ((noteToSave as any)[field] !== (oldNote as any)[field]) {
 					changedFields.push(field);
 				}
 			}
 		}
 
-		syncDebugLog.info('Save Note: N:', o);
+		syncDebugLog.info('Save Note: N:', noteToSave);
 
-		let savedNote = await super.save(o, options);
+		let savedNote = await super.save(noteToSave, options);
+
+		if (noteToSave.is_locally_encrypted === 1) {
+			savedNote.body = plaintextBody;
+			savedNote.is_local_session_unlocked = true;
+		}
+
+		// if (oldNoteForMerge && oldNoteForMerge.is_locally_encrypted !== noteToSave.is_locally_encrypted) {
+		// 	const Resource = this.getClass<typeof ResourceClass>('Resource');
+		// 	const resourceIds = await this.linkedResourceIds(plaintextBody);
+		// 	const localMasterKeyId = noteToSave.is_locally_encrypted === 1 ? (noteToSave.local_master_key_id || '') : (oldNoteForMerge.local_master_key_id || '');
+		// 	await Resource.setLocalEncryptionForIds(resourceIds, noteToSave.is_locally_encrypted || 0, localMasterKeyId);
+		// }
 
 		void ItemChange.add(BaseModel.TYPE_NOTE, savedNote.id, isNew ? ItemChange.TYPE_CREATE : ItemChange.TYPE_UPDATE, {
 			changeSource, changeId: options?.changeId, beforeChangeItemJson: beforeNoteJson,
@@ -861,6 +920,7 @@ export default class Note extends BaseItem {
 			// properties for the UI to work.
 			if (!('deleted_time' in savedNote) || !('share_id' in savedNote)) {
 				const fields = removeElement(unique(this.previewFields().concat(Object.keys(savedNote))), 'type_');
+				pull(fields, 'is_local_session_unlocked');
 				savedNote = await this.load(savedNote.id, {
 					fields,
 				});
@@ -877,7 +937,7 @@ export default class Note extends BaseItem {
 			});
 		}
 
-		if ('todo_due' in o || 'todo_completed' in o || 'is_todo' in o || 'is_conflict' in o) {
+		if ('todo_due' in noteToSave || 'todo_completed' in noteToSave || 'is_todo' in noteToSave || 'is_conflict' in noteToSave) {
 			this.dispatch({
 				type: 'EVENT_NOTE_ALARM_FIELD_CHANGE',
 				id: savedNote.id,

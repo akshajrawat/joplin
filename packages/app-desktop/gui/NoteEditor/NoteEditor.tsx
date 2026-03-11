@@ -59,6 +59,7 @@ import useConnectToEditorPlugin from './utils/useConnectToEditorPlugin';
 import getResourceBaseUrl from './utils/getResourceBaseUrl';
 import useInitialCursorLocation from './utils/useInitialCursorLocation';
 import NotePositionService, { EditorCursorLocations } from '@joplin/lib/services/NotePositionService';
+import VaultLockScreen from '../VaultLockScreen';
 
 const debounce = require('debounce');
 
@@ -644,6 +645,16 @@ function NoteEditorContent(props: NoteEditorProps) {
 			fitToContent={false}
 		/>;
 	};
+
+	const selectedNote = props.notes.find(n => n.id === effectiveNoteId);
+	if (selectedNote?.is_locally_encrypted === 1 && !selectedNote?.is_local_session_unlocked) {
+		return <VaultLockScreen
+			noteId={selectedNote.id}
+			onUnlocked={async () => {
+				await CommandService.instance().execute('openNote', selectedNote.id, props.selectedNoteHash);
+			}}
+		/>;
+	}
 
 	if (formNote.encryption_applied || !formNote.id || !effectiveNoteId) {
 		return renderNoNotes(styles.root);

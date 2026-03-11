@@ -4,6 +4,8 @@ import { localSyncInfo, saveLocalSyncInfo } from '../services/synchronizer/syncI
 import BaseItem from './BaseItem';
 import uuid from '../uuid';
 
+export const SOURCE_LOCAL_VAULT = 2;
+
 export default class MasterKey extends BaseItem {
 	public static tableName() {
 		return 'master_keys';
@@ -49,7 +51,6 @@ export default class MasterKey extends BaseItem {
 	}
 
 	public static async save(o: MasterKeyEntity): Promise<MasterKeyEntity> {
-		const syncInfo = localSyncInfo();
 
 		const masterKey = { ...o };
 		if (!masterKey.id) {
@@ -58,6 +59,28 @@ export default class MasterKey extends BaseItem {
 		}
 
 		masterKey.updated_time = Date.now();
+
+		if (masterKey.source === SOURCE_LOCAL_VAULT) {
+			await this.db().exec('INSERT OR REPLACE INTO master_keys (id, created_time, updated_time, source_application, source, encryption_method, checksum, content) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [
+				masterKey.id,
+				masterKey.created_time,
+				masterKey.updated_time,
+				masterKey.source_application || '',
+				masterKey.source || 0,
+				masterKey.encryption_method || 0,
+				masterKey.checksum || '',
+				masterKey.content || '',
+			]);
+
+			this.dispatch({
+				type: 'MASTERKEY_UPDATE_ONE',
+				item: masterKey,
+			});
+
+			return masterKey;
+		}
+
+		const syncInfo = localSyncInfo();
 
 		const idx = syncInfo.masterKeys.findIndex(mk => mk.id === masterKey.id);
 

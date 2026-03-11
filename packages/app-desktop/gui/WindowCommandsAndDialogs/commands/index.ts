@@ -40,6 +40,7 @@ import * as showShareNoteDialog from './showShareNoteDialog';
 import * as showSpellCheckerMenu from './showSpellCheckerMenu';
 import * as toggleEditors from './toggleEditors';
 import * as toggleLayoutMoveMode from './toggleLayoutMoveMode';
+import * as toggleLocalVault from './toggleLocalVault';
 import * as toggleMenuBar from './toggleMenuBar';
 import * as toggleNoteList from './toggleNoteList';
 import * as toggleNoteType from './toggleNoteType';
@@ -91,6 +92,7 @@ const index: any[] = [
 	showSpellCheckerMenu,
 	toggleEditors,
 	toggleLayoutMoveMode,
+	toggleLocalVault,
 	toggleMenuBar,
 	toggleNoteList,
 	toggleNoteType,

@@ -69,6 +69,14 @@ export default class NoteListUtils {
 						menuUtils.commandToStatefulMenuItem('toggleNoteType', noteIds) as any,
 					),
 				);
+				const selectedNote = notes.find(n => n.id === singleNoteId);
+				const localVaultLabel = selectedNote?.is_locally_encrypted ? _('Unlock Note') : _('Lock Note');
+				menu.append(new MenuItem({
+					label: localVaultLabel,
+					click: async () => {
+						await cmdService.execute('toggleLocalVault', noteIds.slice());
+					},
+				}));
 			} else {
 				const switchNoteType = async (noteIds: string[], type: string) => {
 					for (let i = 0; i < noteIds.length; i++) {
