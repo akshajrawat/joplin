@@ -9,7 +9,8 @@ const fetch = require('node-fetch').default;
 
 const ghReleaseAssets = require('gh-release-assets');
 
-const apiBaseUrl = 'https://api.github.com/repos/joplin/plugins';
+const repoFullName = process.env.GITHUB_REPOSITORY || 'joplin/plugins';
+const apiBaseUrl = `https://api.github.com/repos/${repoFullName}`;
 
 interface Args {
 	pluginRepoDir: string;
@@ -98,6 +99,7 @@ async function uploadAsset(oauthToken: string, uploadUrl: string, pluginInfo: Pl
 			],
 		}, (error: Error, assets: unknown) => {
 			if (error) {
+				console.error("Upload failed! GitHub says:", error);
 				reject(error);
 			} else {
 				resolve(assets);
