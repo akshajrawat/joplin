@@ -38,11 +38,17 @@ enum PlanHostingType {
 	Self = 'self',
 }
 
+export interface PlanTieredPricingTableRow {
+	condition: string;
+	priceYearly: string;
+}
+
 export interface Plan {
 	name: string;
 	title: string;
 	priceMonthly?: StripePublicConfigPrice;
 	priceYearly?: StripePublicConfigPrice;
+	pricingTable?: { rows: PlanTieredPricingTableRow[] };
 	featured: boolean;
 	iconName: string;
 	featuresOn: FeatureId[];
@@ -67,15 +73,38 @@ export enum PriceCurrency {
 	USD = 'USD',
 }
 
-export interface StripePublicConfigPrice {
+export interface StripePublicConfigTieredAmount {
+	amount: string;
+	formattedAmount: string;
+	users: [number, number|'infinity'];
+	userRange: { min: number; max: number };
+}
+
+export interface StripePublicConfigBasePrice {
 	accountType: number; // AccountType
 	id: string;
 	period: PricePeriod;
+	currency: PriceCurrency;
+}
+
+export interface StripePublicConfigFixedPrice extends StripePublicConfigBasePrice {
 	amount: string;
 	formattedAmount: string;
 	formattedMonthlyAmount: string;
-	currency: PriceCurrency;
+
+	amounts: undefined;
 }
+
+export interface StripePublicConfigTieredPrice extends StripePublicConfigBasePrice {
+	amounts: StripePublicConfigTieredAmount[];
+
+	quantityMinimum: number;
+	amount: undefined;
+	formattedAmount: undefined;
+	formattedMonthlyAmount: undefined;
+}
+
+export type StripePublicConfigPrice = StripePublicConfigFixedPrice | StripePublicConfigTieredPrice;
 
 export interface StripePublicConfig {
 	publishableKey: string;
@@ -92,17 +121,28 @@ function formatPrice(amount: string | number, currency: PriceCurrency): string {
 	throw new Error(`Unsupported currency: ${currency}`);
 }
 
-interface FindPriceQuery {
-	accountType?: number;
-	period?: PricePeriod;
-	priceId?: string;
-}
+export const isTieredPrice = (p: StripePublicConfigPrice): p is StripePublicConfigTieredPrice => {
+	return 'amounts' in p;
+};
 
 export function loadStripeConfig(env: string, filePath: string): StripePublicConfig {
 	const config: StripePublicConfig = JSON.parse(fs.readFileSync(filePath, 'utf8'))[env];
 	if (!config) throw new Error(`Invalid env: ${env}`);
 
-	const decoratePrices = (p: StripePublicConfigPrice) => {
+	const decoratePrices = (p: StripePublicConfigPrice): StripePublicConfigPrice => {
+		if (isTieredPrice(p)) {
+			return {
+				...p,
+				amounts: p.amounts.map(amount => ({
+					...amount,
+					formattedAmount: formatPrice(amount.amount, p.currency),
+					userRange: {
+						min: amount.users[0],
+						max: amount.users[1] === 'infinity' ? Number.POSITIVE_INFINITY : amount.users[1],
+					},
+				})),
+			};
+		}
 		return {
 			...p,
 			formattedAmount: formatPrice(p.amount, p.currency),
@@ -114,6 +154,12 @@ export function loadStripeConfig(env: string, filePath: string): StripePublicCon
 	config.archivedPrices = config.archivedPrices.map(decoratePrices);
 
 	return config;
+}
+
+interface FindPriceQuery {
+	accountType?: number;
+	period?: PricePeriod;
+	priceId?: string;
 }
 
 export function findPrice(config: StripePublicConfig, query: FindPriceQuery): StripePublicConfigPrice {
@@ -319,11 +365,10 @@ const getFeatureActions = (planName: PlanName, featureId: FeatureId, featureEnab
 
 	if (featureId === 'maxStorage' && featureEnabled) {
 		if (planName === PlanName.Pro) {
-			// TODO: Enable, when supported by the server
-			// result.push({
-			// 	label: _('Upgrade to 100 GB'),
-			// 	actionId: 'toggleIncreaseStorage',
-			// });
+			result.push({
+				label: _('Upgrade to 100 GB'),
+				actionId: 'toggleIncreaseStorage',
+			});
 		} else if (planName === PlanName.Pro100Gb) {
 			const defaultPlan = features().maxStorage.proInfoShort;
 			result.push({
@@ -400,11 +445,10 @@ export const createFeatureTableMd = () => {
 			name: 'pro',
 			label: 'Pro',
 		},
-		// TODO: Enable, when supported by Joplin Cloud
-		// {
-		// 	name: 'pro100Gb',
-		// 	label: 'Pro 100 GB',
-		// },
+		{
+			name: 'pro100Gb',
+			label: 'Pro 100 GB',
+		},
 		{
 			name: 'teams',
 			label: 'Teams',
@@ -446,8 +490,7 @@ export const createFeatureTableMd = () => {
 			featureLabel: makeFeatureLabel(id, feature),
 			basic: getCellInfo(PlanName.Basic, id, feature),
 			pro: getCellInfo(PlanName.Pro, id, feature),
-			// TODO: Enable when supported by Joplin Cloud
-			// pro100Gb: getCellInfo(PlanName.Pro100Gb, id, feature),
+			pro100Gb: getCellInfo(PlanName.Pro100Gb, id, feature),
 			teams: getCellInfo(PlanName.Teams, id, feature),
 			joplinServerBusiness: getCellInfo(PlanName.JoplinServerBusiness, id, feature),
 		};
@@ -458,7 +501,32 @@ export const createFeatureTableMd = () => {
 	return markdownUtils.createMarkdownTable(headers, rows);
 };
 
+const getTieredPricingTable = (price: StripePublicConfigPrice) => {
+	if (!isTieredPrice(price)) throw new Error(`Not a tiered price: ${price.id}`);
+
+	const rows: PlanTieredPricingTableRow[] = [];
+	for (const amount of price.amounts) {
+		const formatUserCount = (count: number) => {
+			if (count === Number.POSITIVE_INFINITY) {
+				return '∞';
+			}
+			return String(count);
+		};
+		rows.push({
+			condition: `${
+				formatUserCount(amount.userRange.min)
+			}—${
+				formatUserCount(amount.userRange.max)
+			} users`,
+			priceYearly: `${amount.formattedAmount} / user / year`,
+		});
+	}
+	return rows;
+};
+
 export function getPlans(stripeConfig: StripePublicConfig): Record<PlanName, Plan> {
+	// TODO: Set to true to enable self-hosting self-service.
+	const selfServiceSelfHostingEnabled = false;
 	return {
 		basic: {
 			name: 'basic',
@@ -563,8 +631,23 @@ export function getPlans(stripeConfig: StripePublicConfig): Record<PlanName, Pla
 			featuresOff: [],
 			featureLabelsOn: getFeatureLabelsByPlan(PlanName.JoplinServerBusiness, true),
 			featureLabelsOff: [],
-			cfaLabel: _('Get a quote'),
-			cfaUrl: 'https://tally.so/r/D4BlOE',
+			...(selfServiceSelfHostingEnabled ? {
+				pricingTable: {
+					rows: getTieredPricingTable(findPrice(stripeConfig, {
+						accountType: 5,
+						period: PricePeriod.Yearly,
+					})),
+				},
+				cfaLabel: _('Try it now'),
+				cfaUrl: '',
+				priceYearly: findPrice(stripeConfig, {
+					accountType: 5,
+					period: PricePeriod.Yearly,
+				}),
+			} : {
+				cfaLabel: _('Get a quote'),
+				cfaUrl: 'https://tally.so/r/D4BlOE',
+			}),
 			footnote: '',
 			learnMoreUrl: 'https://joplinapp.org/help/apps/joplin_server_business',
 			hostingType: PlanHostingType.Self,
